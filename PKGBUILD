@@ -16,7 +16,10 @@ options=(strip staticlibs !makeflags !distcc !emptydirs)
 source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
 install=${pkgname}.install
 sha256sums=('SKIP')
-#_my_verbose_=--verbose
+#_cabal_verbose=--verbose
+_cabal_sandboxdir=$HOME/tmp/.cabal_sandbox_$pkgname
+# in case your /tmp has no executable rights...
+export TMPDIR=$HOME/tmp/$pkgname
 
 #pkgver() {
 #  cd "$srcdir/$pkgname"
@@ -35,27 +38,31 @@ prepare() {
 
 build() {
   cd "$srcdir/$pkgname"
-  cabal sandbox $_my_verbose_ init
-  cabal update $_my_verbose_
-  cabal install $_my_verbose_ --only-dependencies --flags="embed_data_files" hsb2hs .
-  cabal configure $_my_verbose_ \
+  [ -n "$TMPDIR" ] && mkdir -p "$TMPDIR"
+  # only init sandbox if not existing yet: destroys existing sandbox!
+  local sandboxdir=""
+  [ -n "$_cabal_sandboxdir" ] && sandboxdir="--sandbox=$_cabal_sandboxdir"
+  [ ! -d "$_cabal_sandboxdir" ] && cabal sandbox $_cabal_verbose $sandboxdir init
+  cabal update $_cabal_verbose
+  cabal install $_cabal_verbose --only-dependencies --flags="embed_data_files"
+  cabal configure $_cabal_verbose \
     --flags="embed_data_files" \
     --prefix=/usr \
-    --datadir=/usr/share/$pkgname/data \
+    --datadir=/usr/share/$pkgname \
     --datasubdir= \
     --docdir=/usr/share/doc/$pkgname \
     --libsubdir=$pkgname
-  cabal build $_my_verbose_
-  cabal register $_my_verbose_ --inplace
+  cabal build $_cabal_verbose
+  cabal register $_cabal_verbose --inplace
 }
 
 package() {
   cd "$srcdir/$pkgname"
-  cabal copy $_my_verbose_ --destdir=$pkgdir
+  cabal copy $_cabal_verbose --destdir=$pkgdir
 # For some reason the library is installed anyway
 # Remove all files and !emptydirs takes care of the rest
   msg2 "Removing lib files..."
-  find ${pkgdir} -iname lib -print0 | xargs -0 rm -vf
+  find ${pkgdir} -iname lib -print0 | xargs -0 rm -rvf
 #  msg2 "Adjusting license and doc dirs..."
 #  mv $pkgdir/usr/share/doc/
 #  install -D -m744 register.sh   ${pkgdir}/usr/share/haskell/${pkgname}/register.sh
