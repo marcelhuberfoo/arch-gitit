@@ -16,6 +16,7 @@ options=(strip staticlibs !makeflags !distcc !emptydirs)
 source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
 install=${pkgname}.install
 sha256sums=('SKIP')
+#_my_verbose_=--verbose
 
 #pkgver() {
 #  cd "$srcdir/$pkgname"
@@ -33,35 +34,35 @@ prepare() {
 }
 
 build() {
-    cd "$srcdir/$pkgname"
-    cabal sandbox --verbose init
-    cabal update --verbose
-    cabal install --verbose --only-dependencies --flags="embed_data_files" hsb2hs .
-    cabal configure --verbose \
-    	--flags="embed_data_files" \
-    	--prefix=/usr \
-    	--datadir=/usr/share/$pkgname/data \
-    	--datasubdir= \
-    	--docdir=/usr/share/doc/$pkgname \
-    	--libsubdir=$pkgname
-    cabal build --verbose
-    cabal register --verbose --inplace
+  cd "$srcdir/$pkgname"
+  cabal sandbox $_my_verbose_ init
+  cabal update $_my_verbose_
+  cabal install $_my_verbose_ --only-dependencies --flags="embed_data_files" hsb2hs .
+  cabal configure $_my_verbose_ \
+    --flags="embed_data_files" \
+    --prefix=/usr \
+    --datadir=/usr/share/$pkgname/data \
+    --datasubdir= \
+    --docdir=/usr/share/doc/$pkgname \
+    --libsubdir=$pkgname
+  cabal build $_my_verbose_
+  cabal register $_my_verbose_ --inplace
 }
 
 package() {
   cd "$srcdir/$pkgname"
-  cabal copy --verbose --destdir=$pkgdir
+  cabal copy $_my_verbose_ --destdir=$pkgdir
 # For some reason the library is installed anyway
 # Remove all files and !emptydirs takes care of the rest
   msg2 "Removing lib files..."
   find ${pkgdir} -iname lib -print0 | xargs -0 rm -vf
 #  msg2 "Adjusting license and doc dirs..."
 #  mv $pkgdir/usr/share/doc/
-#    install -D -m744 register.sh   ${pkgdir}/usr/share/haskell/${pkgname}/register.sh
-#    install    -m744 unregister.sh ${pkgdir}/usr/share/haskell/${pkgname}/unregister.sh
-#    install -d -m755 ${pkgdir}/usr/share/doc/ghc/html/libraries
-#    ln -s /usr/share/doc/${pkgname}/html ${pkgdir}/usr/share/doc/ghc/html/libraries/${_hkgname}
-#    runhaskell Setup copy --destdir=${pkgdir}
+#  install -D -m744 register.sh   ${pkgdir}/usr/share/haskell/${pkgname}/register.sh
+#  install    -m744 unregister.sh ${pkgdir}/usr/share/haskell/${pkgname}/unregister.sh
+#  install -d -m755 ${pkgdir}/usr/share/doc/ghc/html/libraries
+#  ln -s /usr/share/doc/${pkgname}/html ${pkgdir}/usr/share/doc/ghc/html/libraries/${_hkgname}
+#  runhaskell Setup copy --destdir=${pkgdir}
 }
 
 #package() {
