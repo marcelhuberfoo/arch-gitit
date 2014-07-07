@@ -36,18 +36,27 @@ build() {
     cd "$srcdir/$pkgname"
     cabal sandbox --verbose init
     cabal update --verbose
-    cabal install --verbose --dry-run --only-dependencies
-#    runhaskell Setup configure -O ${PKGBUILD_HASKELL_ENABLE_PROFILING:+-p } --enable-split-objs --enable-shared \
-#       --prefix=/usr --docdir=/usr/share/doc/${pkgname} --libsubdir=\$compiler/site-local/\$pkgid
-#    runhaskell Setup build
-#    runhaskell Setup haddock
-#    runhaskell Setup register   --gen-script
-#    runhaskell Setup unregister --gen-script
-#    sed -i -r -e "s|ghc-pkg.*unregister[^ ]* |&'--force' |" unregister.sh
+    cabal install --verbose --only-dependencies --flags="embed_data_files" hsb2hs .
+    cabal configure --verbose \
+    	--flags="embed_data_files" \
+    	--prefix=/usr \
+    	--datadir=/usr/share/$pkgname/data \
+    	--datasubdir= \
+    	--docdir=/usr/share/doc/$pkgname \
+    	--libsubdir=$pkgname
+    cabal build --verbose
+    cabal register --verbose --inplace
 }
 
 package() {
-    cd "$srcdir/$pkgname"
+  cd "$srcdir/$pkgname"
+  cabal copy --verbose --destdir=$pkgdir
+# For some reason the library is installed anyway
+# Remove all files and !emptydirs takes care of the rest
+  msg2 "Removing lib files..."
+  find ${pkgdir} -iname lib -print0 | xargs -0 rm -vf
+#  msg2 "Adjusting license and doc dirs..."
+#  mv $pkgdir/usr/share/doc/
 #    install -D -m744 register.sh   ${pkgdir}/usr/share/haskell/${pkgname}/register.sh
 #    install    -m744 unregister.sh ${pkgdir}/usr/share/haskell/${pkgname}/unregister.sh
 #    install -d -m755 ${pkgdir}/usr/share/doc/ghc/html/libraries
