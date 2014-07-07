@@ -39,10 +39,9 @@ prepare() {
 build() {
   cd "$srcdir/$pkgname"
   [ -n "$TMPDIR" ] && mkdir -p "$TMPDIR"
-  # only init sandbox if not existing yet: destroys existing sandbox!
   local sandboxdir=""
   [ -n "$_cabal_sandboxdir" ] && sandboxdir="--sandbox=$_cabal_sandboxdir"
-  [ ! -d "$_cabal_sandboxdir" ] && cabal sandbox $_cabal_verbose $sandboxdir init
+  cabal sandbox $_cabal_verbose $sandboxdir init
   cabal update $_cabal_verbose
   cabal install $_cabal_verbose --only-dependencies --flags="embed_data_files"
   cabal configure $_cabal_verbose \
@@ -62,22 +61,11 @@ package() {
 # For some reason the library is installed anyway
 # Remove all files and !emptydirs takes care of the rest
   msg2 "Removing lib files..."
-  find ${pkgdir} -iname lib -print0 | xargs -0 rm -rvf
-#  msg2 "Adjusting license and doc dirs..."
-#  mv $pkgdir/usr/share/doc/
-#  install -D -m744 register.sh   ${pkgdir}/usr/share/haskell/${pkgname}/register.sh
-#  install    -m744 unregister.sh ${pkgdir}/usr/share/haskell/${pkgname}/unregister.sh
-#  install -d -m755 ${pkgdir}/usr/share/doc/ghc/html/libraries
-#  ln -s /usr/share/doc/${pkgname}/html ${pkgdir}/usr/share/doc/ghc/html/libraries/${_hkgname}
-#  runhaskell Setup copy --destdir=${pkgdir}
+  find ${pkgdir} -iname lib -print0 | xargs -0 rm -rf
+  msg2 "Moving license..."
+  install -Dm444 $pkgdir/usr/share/doc/$pkgname/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
+  rm -f $pkgdir/usr/share/doc/$pkgname/LICENSE
+  rm -r $pkgdir/usr/share/doc/$pkgname
 }
-
-#package() {
-#  cd "$srcdir/$pkgname"
-#  make DESTDIR="$pkgdir" install
-#  mkdir "$pkgdir/usr/lib/systemd/user"
-#  cd "$pkgdir/usr/lib/systemd/user"
-#  ln -s "$pkdir/usr/lib/systemd/system/envoy@.service" "$pkdir/usr/lib/systemd/system/envoy@.socket" .
-#}
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
