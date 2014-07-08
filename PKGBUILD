@@ -13,11 +13,9 @@ depends=('icu>=52' 'icu<=54')
 makedepends=('ghc' 'sh' 'cabal-install' 'alex' 'happy')
 optdepends=('texlive-most: for pdf creation')
 options=(strip staticlibs !makeflags !distcc !emptydirs)
-source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver"
-        cabal.config)
-install=${pkgname}.install
-sha256sums=('SKIP'
-            'bbc4fba27a7653dc332433ced1015bb9a3600cda17e2e28a698846a426442edb')
+source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
+install=$pkgname.install
+sha256sums=('SKIP')
 #_cabal_verbose=--verbose
 _cabal_sandboxdir=$HOME/tmp/.cabal_sandbox_$pkgname
 # in case your /tmp has no executable rights...
@@ -45,16 +43,22 @@ build() {
   [ -n "$_cabal_sandboxdir" ] && sandboxdir="--sandbox=$_cabal_sandboxdir"
   cabal sandbox $_cabal_verbose $sandboxdir init
   cabal update $_cabal_verbose
-  cabal install $_cabal_verbose --only-dependencies --flags="embed_data_files"
+  cabal install $_cabal_verbose \
+    --flags="embed_data_files" \
+    --only-dependencies
   cabal configure $_cabal_verbose \
     --flags="embed_data_files" \
+    --enable-split-objs \
+    --enable-shared \
     --prefix=/usr \
-    --datadir=/usr/share/$pkgname \
+    --datadir=\$prefix/share/\$pkgid \
     --datasubdir= \
-    --docdir=/usr/share/doc/$pkgname \
-    --libsubdir=$pkgname
+    --docdir=\$prefix/share/doc/\$pkgid \
+    --libsubdir=\$compiler/\$pkgid
   cabal build $_cabal_verbose
-  cabal register $_cabal_verbose --inplace
+  cabal haddock $_cabal_verbose
+#  cabal register $_cabal_verbose --inplace
+  cabal register $_cabal_verbose --gen-script
 }
 
 package() {
@@ -62,12 +66,12 @@ package() {
   cabal copy $_cabal_verbose --destdir=$pkgdir
 # For some reason the library is installed anyway
 # Remove all files and !emptydirs takes care of the rest
-  msg2 "Removing lib files..."
-  find ${pkgdir} -iname lib -print0 | xargs -0 rm -rf
-  msg2 "Moving license..."
-  install -Dm444 $pkgdir/usr/share/doc/$pkgname/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
-  rm -f $pkgdir/usr/share/doc/$pkgname/LICENSE
-  rm -r $pkgdir/usr/share/doc
+#  msg2 "Removing lib files..."
+#  find ${pkgdir} -iname lib -print0 | xargs -0 rm -rf
+  msg2 "Copying license..."
+  install -Dm644 register.sh ${pkgdir}/usr/share/$pkgname-$pkgver/register.sh
+  install -Dm444 $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
+  rm -f $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
