@@ -11,11 +11,13 @@ arch=('i686' 'x86_64')
 # Needed for pandoc-citeproc
 depends=('icu>=52' 'icu<=54')
 makedepends=('ghc' 'sh' 'cabal-install' 'alex' 'happy')
-#optdepends=('texlive-most: for pdf creation')
+optdepends=('texlive-most: for pdf creation')
 options=(strip staticlibs !makeflags !distcc !emptydirs)
-source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
+source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver"
+        cabal.config)
 install=${pkgname}.install
-sha256sums=('SKIP')
+sha256sums=('SKIP'
+            'bbc4fba27a7653dc332433ced1015bb9a3600cda17e2e28a698846a426442edb')
 #_cabal_verbose=--verbose
 _cabal_sandboxdir=$HOME/tmp/.cabal_sandbox_$pkgname
 # in case your /tmp has no executable rights...
@@ -65,7 +67,7 @@ package() {
   msg2 "Moving license..."
   install -Dm444 $pkgdir/usr/share/doc/$pkgname/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
   rm -f $pkgdir/usr/share/doc/$pkgname/LICENSE
-  rm -r $pkgdir/usr/share/doc/$pkgname
+  rm -r $pkgdir/usr/share/doc
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
