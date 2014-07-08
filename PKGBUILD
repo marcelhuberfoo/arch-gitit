@@ -34,23 +34,74 @@ export TMPDIR=$HOME/tmp/$pkgname
 #}
 
 prepare() {
-  cd "$srcdir/$pkgname"
-  local _builddir=$srcdir/build
-  local _libdir=$_builddir/usr/lib
-  mkdir -p $srcdir/{build,$pkgname-$pkgver}
+#  cd "$srcdir/$pkgname"
+  cd "$srcdir"
+  local _builddir=$srcdir/
+  local _prefixdir=$srcdir/build
+  local _libdir=$_prefixdir/usr/lib
+  local _pkgsrc="$srcdir/$pkgname"
+  mkdir -p $_prefixdir
   while read _hpkg; do
     echo "entry [$_hpkg]"
-    [ -d "$_libdir" ] && continue
-  done <(cabal install --flags="embed_data_files" --only-dependencies --dry-run )
+    [ -d "$_libdir/$_hpkg" ] && continue
+    local _curpkgdir=$srcdir/$_hpkg
+    pushd $_curpkgdir >/dev/null
+    msg2 "Fetching $_hpkg"
+    case $_hpkg in
+      $pkgname-$pkgver)
+        HOME=$_builddir cabal configure \
+          --flags="embed_data_files plugins" \
+          --prefix=/usr \
+          --libdir=$_libddir \
+          --verbose
+        HOME=$_builddir cabal build
+        HOME=$_builddir cabal register --inplace
+      ;;
+
+      *)
+        HOME=$_builddir \
+        cabal install --prefix=$_builddir/usr --flags="embed_data_files"
+      ;;
+    esac
+    popd >/dev/null
+  done < <(cd "$srcdir/$pkgname" && cabal install --flags="embed_data_files plugins" --dependencies-only --dry-run 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1 )
 }
 
 build() {
+  cd "$srcdir/$pkgname"
+  local _builddir=$srcdir/build
+  local _libdir=$_builddir/usr/lib
+  local _pkgsrc="$srcdir/$pkgname"
+  while read _hpkg; do
+    echo "entry [$_hpkg]"
+    continue
+    [ -d "$_libdir/$_hpkg" ] && continue
+    pushd $_pkgsrc/$_hkpkg >/dev/null
+    msg2 "Building $_hkpkg"
+    case $_hkpkg in
+      $pkgname-$pkgver)
+        HOME=$_pkgsrc cabal configure --prefix=/usr --libdir=$_libddir --verbose
+        HOME=$_pkgsrc cabal build
+        HOME=$_pkgsrc cabal register --inplace
+      ;;
+
+      *)
+        HOME=$_pkgsrc \
+        cabal install --prefix=$_builddir/usr --flags="embed_data_files"
+      ;;
+    esac
+    popd >/dev/null
+  done < <(cabal install --flags="embed_data_files" --only-dependencies --dry-run 2>/dev/null | grep "\-[0-9]\+" )
+}
+
+buildX() {
   cd "$srcdir/$pkgname"
   [ -n "$TMPDIR" ] && mkdir -p "$TMPDIR"
   local sandboxdir=""
   if [ $_cabal_dosandbox ]; then
     [ -n "$_cabal_sandboxdir" ] && sandboxdir="--sandbox=$_cabal_sandboxdir"
     cabal sandbox $_cabal_verbose $sandboxdir init
+  fi
   cabal update $_cabal_verbose
   cabal install $_cabal_verbose \
     --flags="embed_data_files" \
