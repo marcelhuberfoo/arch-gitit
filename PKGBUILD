@@ -69,8 +69,9 @@ prepare() {
   for _hspackages in "${_depends[@]}"; do
     local _flags="${_hspackages##*:}"
     local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
-    msg2 "Extracting packages"
+    msg2 "Downloading packages"
     cabal fetch $_packages
+    msg2 "Extracting packages"
     echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
   done
 }
