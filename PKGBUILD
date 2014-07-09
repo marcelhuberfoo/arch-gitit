@@ -9,8 +9,8 @@ url="https://github.com/jgm/gitit"
 license=('GPL')
 arch=('i686' 'x86_64')
 # Needed for pandoc-citeproc
-depends=('icu>=52' 'icu<=54')
-makedepends=('ghc' 'sh' 'cabal-install' 'alex' 'happy')
+depends=('sh' 'icu>=52' 'icu<=54' 'ghc' 'cabal-install>=1.20')
+makedepends=()
 optdepends=('texlive-most: for pdf creation')
 options=(strip staticlibs !makeflags !distcc !emptydirs)
 source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
@@ -19,8 +19,6 @@ sha256sums=('SKIP')
 #_cabal_verbose=--verbose
 _cabal_dosandbox=0
 _cabal_sandboxdir=$HOME/tmp/.cabal_sandbox_$pkgname
-# in case your /tmp has no executable rights...
-export TMPDIR=$HOME/tmp/$pkgname
 
 #pkgver() {
 #  cd "$srcdir/$pkgname"
@@ -33,8 +31,50 @@ export TMPDIR=$HOME/tmp/$pkgname
 #  fi
 #}
 
+_cabal_cmd="HOME=\$srcdir/build; cabal"
+_depends=()
+
+# $@ contains list of packages to get dependencies for
+getdepends() {
+  local _cmd="$_cabal_cmd install --dry-run $@ | grep \"\-[0-9]\+\" | cut -d' ' -f1 | tr '\n' ':'"
+  local _dependencies="$(cd $srcdir/$pkgname && eval $_cmd 2>/dev/null)"
+  echo "$_dependencies"
+}
+
 prepare() {
-#  cd "$srcdir/$pkgname"
+  eval "$_cabal_cmd update"
+  _depends[0]=$(getdepends alex happy):"embed_data_files"
+#  _depends[1]=$(getdepends .):"embed_data_files plugins"
+  for _hspackages in "${_depends[@]}"; do
+    local _flags="${_hspackages##*:}"
+    local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
+    eval "$_cabal_cmd fetch $_packages"
+    echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --bar "cd $srcdir/build && find $_cabal_buildlocal -name {}.tar.gz -exec tar xzf \{\} \;"
+  done
+}
+
+build() {
+  local _builddir=$srcdir/build
+  local _confdir=$_builddir/conf
+  local _tmpdir=$_builddir/tmp
+  mkdir -p $_confdir $_tmpdir
+  for _hspackages in "${_depends[@]}"; do
+    local _flags="${_hspackages##*:}"
+    local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
+    echo "pkg [$_packages]"
+    local _pkgwithver=$pkgname-$pkgver
+    local _cmd="echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --jobs=1 --bar \"cd $_builddir/{} && HOME=$_builddir; TMPDIR=$_tmpdir; cabal configure --verbose --flags=\\\"$_flags\\\" --prefix=/usr/lib/$_pkgwithver --datadir=/usr/share/$_pkgwithver --docdir=\\\$datadir/doc/\\\$pkgid --datasubdir=data/\\\$pkgid --libsubdir=\\\$compiler/\\\$pkgid;\"" 
+#    local _cmd="cd $_builddir/{} && $_cabal_cmd configure --verbose --flags=\"$_flags\" --prefix=/usr/lib/$_pkgwithver --datadir=/usr/share/$_pkgwithver --docdir=\\\$datadir/doc/\\\$pkgid --datasubdir=data/\\\$pkgid --libsubdir=\\\$compiler/\\\$pkgid ;" 
+#   "$_cabal_cmd build ; $_cabal_cmd register --gen-pkg-config; cp {}.conf $_confdir; $_cabal_cmd register --inplace;"
+#   "$_cabal_cmd copy --destdir=$pkgdir"
+    echo "cmd [$_cmd]"
+    eval "$_cmd"
+#    echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --jobs=1 --bar $_cmd
+  done
+  false
+}
+
+prepold() {
   cd "$srcdir"
   local _builddir=$srcdir/
   local _prefixdir=$srcdir/build
@@ -64,10 +104,10 @@ prepare() {
       ;;
     esac
     popd >/dev/null
-  done < <(cd "$srcdir/$pkgname" && cabal install --flags="embed_data_files plugins" --dependencies-only --dry-run 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1 )
+  done < <(cd "$srcdir/$pkgname" && cabal install --dependencies-only --dry-run 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1 )
 }
 
-build() {
+buildY() {
   cd "$srcdir/$pkgname"
   local _builddir=$srcdir/build
   local _libdir=$_builddir/usr/lib
@@ -123,10 +163,9 @@ buildX() {
 package() {
   cd "$srcdir/$pkgname"
   cabal copy $_cabal_verbose --destdir=$pkgdir
-  msg2 "Copying license..."
-  install -Dm544 register.sh ${pkgdir}/usr/share/$pkgname-$pkgver/register.sh
-  install -Dm444 $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
-  rm -f $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE
+#  msg2 "Copying license..."
+#  install -Dm444 $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
+#  rm -f $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
