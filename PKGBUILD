@@ -10,15 +10,12 @@ license=('GPL')
 arch=('i686' 'x86_64')
 # Needed for pandoc-citeproc
 depends=('sh' 'icu>=52' 'icu<=54' 'ghc' 'cabal-install>=1.20')
-makedepends=()
+makedepends=('parallel')
 optdepends=('texlive-most: for pdf creation')
 options=(strip staticlibs !makeflags !distcc !emptydirs)
 source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
 #install=$pkgname.install
 sha256sums=('SKIP')
-#_cabal_verbose=--verbose
-_cabal_dosandbox=0
-_cabal_sandboxdir=$HOME/tmp/.cabal_sandbox_$pkgname
 
 #pkgver() {
 #  cd "$srcdir/$pkgname"
@@ -31,141 +28,93 @@ _cabal_sandboxdir=$HOME/tmp/.cabal_sandbox_$pkgname
 #  fi
 #}
 
-_cabal_cmd="HOME=\$srcdir/build; cabal"
+_cabal_verbose=--verbose
+_builddir=
+_confdir=
+_tmpdir=
+_pkgwithver=
+_tmppackages=
+_tmpbindir=
+_cabaldir=
 _depends=()
+
+_setupDirs() {
+  _builddir=$srcdir/build
+  _confdir=$_builddir/conf
+  _tmpdir=$_builddir/tmp
+  _pkgwithver=$pkgname-$pkgver
+  _tmppackages=$_builddir/pkg
+  _tmpbindir=$_tmppackages/usr/lib/$_pkgwithver/bin
+  _cabaldir=$_builddir/.cabal
+  mkdir -p $_confdir $_tmpdir $_tmppackages
+}
+
+_setupEnv() {
+  HOME=$_builddir; TMPDIR=$_tmpdir; PATH=$_tmpbindir:$PATH
+}
 
 # $@ contains list of packages to get dependencies for
 getdepends() {
-  local _cmd="$_cabal_cmd install --dry-run $@ | grep \"\-[0-9]\+\" | cut -d' ' -f1 | tr '\n' ':'"
-  local _dependencies="$(cd $srcdir/$pkgname && eval $_cmd 2>/dev/null)"
-  echo "$_dependencies"
+  pushd "$srcdir/$pkgname" >/dev/null
+  cabal install --dry-run $@ 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1 | tr '\n' ':'
+  popd >/dev/null
 }
 
 prepare() {
-  eval "$_cabal_cmd update"
+  _setupDirs
+  _setupEnv
+  cabal update $_cabal_verbose
   _depends[0]=$(getdepends alex happy):"embed_data_files"
-#  _depends[1]=$(getdepends .):"embed_data_files plugins"
+  _depends[1]=$(getdepends .):"embed_data_files plugins"
   for _hspackages in "${_depends[@]}"; do
     local _flags="${_hspackages##*:}"
     local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
-    eval "$_cabal_cmd fetch $_packages"
-    echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --bar "cd $srcdir/build && find $_cabal_buildlocal -name {}.tar.gz -exec tar xzf \{\} \;"
+    msg2 "Extracting packages"
+    cabal fetch $_packages
+    echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
   done
 }
 
 build() {
-  local _builddir=$srcdir/build
-  local _confdir=$_builddir/conf
-  local _tmpdir=$_builddir/tmp
-  mkdir -p $_confdir $_tmpdir
   for _hspackages in "${_depends[@]}"; do
     local _flags="${_hspackages##*:}"
     local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
-    echo "pkg [$_packages]"
-    local _pkgwithver=$pkgname-$pkgver
-    local _cmd="echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --jobs=1 --bar \"cd $_builddir/{} && HOME=$_builddir; TMPDIR=$_tmpdir; cabal configure --verbose --flags=\\\"$_flags\\\" --prefix=/usr/lib/$_pkgwithver --datadir=/usr/share/$_pkgwithver --docdir=\\\$datadir/doc/\\\$pkgid --datasubdir=data/\\\$pkgid --libsubdir=\\\$compiler/\\\$pkgid;\"" 
-#    local _cmd="cd $_builddir/{} && $_cabal_cmd configure --verbose --flags=\"$_flags\" --prefix=/usr/lib/$_pkgwithver --datadir=/usr/share/$_pkgwithver --docdir=\\\$datadir/doc/\\\$pkgid --datasubdir=data/\\\$pkgid --libsubdir=\\\$compiler/\\\$pkgid ;" 
-#   "$_cabal_cmd build ; $_cabal_cmd register --gen-pkg-config; cp {}.conf $_confdir; $_cabal_cmd register --inplace;"
-#   "$_cabal_cmd copy --destdir=$pkgdir"
-    echo "cmd [$_cmd]"
-    eval "$_cmd"
-#    echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --jobs=1 --bar $_cmd
+    for _hpkg in $_packages; do
+        if [ ! -d "$_builddir/$_hpkg" ]; then echo "Package $_hpkg not found, skipping"; continue; fi
+        pushd $_builddir/$_hpkg >/dev/null
+        msg2 "Building $_hpkg $_nameonly"
+        cabal configure \
+          --flags="$_flags" \
+          --prefix=/usr/lib/$_pkgwithver \
+          --datadir=/usr/share/$_pkgwithver \
+          --docdir=\$datadir/doc/\$pkgid \
+          --datasubdir=data/\$pkgid \
+          --libsubdir=\$pkgid
+        cabal build >/dev/null;
+        cabal register --gen-pkg-config >/dev/null
+        [ -r "$_hpkg.conf" ] && cp $_hpkg.conf $_confdir;
+        cabal register --inplace >/dev/null
+        cabal copy --destdir=$_tmppackages
+        popd >/dev/null
+    done
   done
-  false
-}
-
-prepold() {
-  cd "$srcdir"
-  local _builddir=$srcdir/
-  local _prefixdir=$srcdir/build
-  local _libdir=$_prefixdir/usr/lib
-  local _pkgsrc="$srcdir/$pkgname"
-  mkdir -p $_prefixdir
-  while read _hpkg; do
-    echo "entry [$_hpkg]"
-    [ -d "$_libdir/$_hpkg" ] && continue
-    local _curpkgdir=$srcdir/$_hpkg
-    pushd $_curpkgdir >/dev/null
-    msg2 "Fetching $_hpkg"
-    case $_hpkg in
-      $pkgname-$pkgver)
-        HOME=$_builddir cabal configure \
-          --flags="embed_data_files plugins" \
-          --prefix=/usr \
-          --libdir=$_libddir \
-          --verbose
-        HOME=$_builddir cabal build
-        HOME=$_builddir cabal register --inplace
-      ;;
-
-      *)
-        HOME=$_builddir \
-        cabal install --prefix=$_builddir/usr --flags="embed_data_files"
-      ;;
-    esac
-    popd >/dev/null
-  done < <(cd "$srcdir/$pkgname" && cabal install --dependencies-only --dry-run 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1 )
-}
-
-buildY() {
-  cd "$srcdir/$pkgname"
-  local _builddir=$srcdir/build
-  local _libdir=$_builddir/usr/lib
-  local _pkgsrc="$srcdir/$pkgname"
-  while read _hpkg; do
-    echo "entry [$_hpkg]"
-    continue
-    [ -d "$_libdir/$_hpkg" ] && continue
-    pushd $_pkgsrc/$_hkpkg >/dev/null
-    msg2 "Building $_hkpkg"
-    case $_hkpkg in
-      $pkgname-$pkgver)
-        HOME=$_pkgsrc cabal configure --prefix=/usr --libdir=$_libddir --verbose
-        HOME=$_pkgsrc cabal build
-        HOME=$_pkgsrc cabal register --inplace
-      ;;
-
-      *)
-        HOME=$_pkgsrc \
-        cabal install --prefix=$_builddir/usr --flags="embed_data_files"
-      ;;
-    esac
-    popd >/dev/null
-  done < <(cabal install --flags="embed_data_files" --only-dependencies --dry-run 2>/dev/null | grep "\-[0-9]\+" )
-}
-
-buildX() {
-  cd "$srcdir/$pkgname"
-  [ -n "$TMPDIR" ] && mkdir -p "$TMPDIR"
-  local sandboxdir=""
-  if [ $_cabal_dosandbox ]; then
-    [ -n "$_cabal_sandboxdir" ] && sandboxdir="--sandbox=$_cabal_sandboxdir"
-    cabal sandbox $_cabal_verbose $sandboxdir init
-  fi
-  cabal update $_cabal_verbose
-  cabal install $_cabal_verbose \
-    --flags="embed_data_files" \
-    --only-dependencies
-  cabal configure $_cabal_verbose \
-    --flags="embed_data_files plugins" \
-    --prefix=/usr \
-    --datadir=\$prefix/share/\$pkgid \
-    --datasubdir= \
-    --docdir=\$prefix/share/doc/\$pkgid \
-    --libsubdir=\$compiler/\$pkgid
-#    --enable-split-objs \
-#    --enable-shared \
-  cabal build $_cabal_verbose
-  cabal haddock $_cabal_verbose
-  cabal register $_cabal_verbose --gen-script
 }
 
 package() {
-  cd "$srcdir/$pkgname"
-  cabal copy $_cabal_verbose --destdir=$pkgdir
-#  msg2 "Copying license..."
-#  install -Dm444 $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
-#  rm -f $pkgdir/usr/share/doc/$pkgname-$pkgver/LICENSE
+  _setupDirs
+  local _licensedstdir=$pkgdir/usr/share/licenses/$_pkgwithver
+  local _licensesrcdir=$_tmppackages/usr/share/$_pkgwithver/doc
+  mkdir -p $_licensedstdir
+  msg2 "Copying licenses..."
+  ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
+  msg2 "Copying register configs..."
+  ( cd $_confdir && find . -name '*.conf' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_confdir/{} $pkgdir/usr/lib/$_pkgwithver/conf/{}" )
+  msg2 "Copying docs..."
+  ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' usr/share/$_pkgwithver/doc ) | ( cd $pkgdir && tar xf - )
+  msg2 "Copying libs..."
+  ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' usr/lib/$_pkgwithver/lib ) | ( cd $pkgdir && tar xf - )
+  msg2 "Copying bins..."
+  ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' usr/lib/$_pkgwithver/bin ) | ( cd $pkgdir && tar xf - )
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
