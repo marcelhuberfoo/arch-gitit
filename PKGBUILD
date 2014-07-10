@@ -160,14 +160,14 @@ package() {
   msg2 "Registering packages in package.conf.d..."
   find $_confdir -name '*.conf' -exec ghc-pkg update --force --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
   msg2 "Creating scripts in /usr/bin..."
-  local _wrapperScriptLocation=/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
+  local _wrapperScriptLocation=$pkgdir/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
   mkdir -p $pkgdir/usr/bin
   _createWrapperScript "$_wrapperScriptLocation" "$(cat $srcdir/ld.path | tr '\n' ':')"
   for binname in gitit expireGititCache; do
     local _binrel=usr/lib/$_pkgwithver/bin/$binname
     local _fullbinpath=$pkgdir/$_binrel
     install -Dm555 $_tmppackages/$_binrel $_fullbinpath
-    [ -f "$_fullbinpath" ] && ln -s $_wrapperScriptLocation $pkgdir/usr/bin/$binname
+    [ -f "$_fullbinpath" ] && ( cd $pkgdir/usr/bin && ln -s ${_wrapperScriptLocation/$pkgdir/} $binname )
   done
   # prepare ld-library-path from rpath entries and delete rpath entries
   find $pkgdir/usr/lib/$_pkgwithver/ -name '*.so' | parallel --no-notice --no-run-if-empty --bar "chrpath --list {} 2>/dev/null && chrpath --delete {} >/dev/null 2>&1" | sed -n 's|.*RPATH=||g p' | tr ':' '\n' | sort | uniq | sed -r -e "s|^.*/([^/]*)/dist/build|/usr/lib/$_pkgwithver/lib/\1|" >$srcdir/ld.path
