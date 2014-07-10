@@ -162,6 +162,7 @@ package() {
   msg2 "Creating scripts in /usr/bin..."
   local _wrapperScriptLocation=/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
   mkdir -p $pkgdir/usr/bin
+  _createWrapperScript "$_wrapperScriptLocation" "$(cat $srcdir/ld.path | tr '\n' ':')"
   for binname in gitit expireGititCache; do
     local _binrel=usr/lib/$_pkgwithver/bin/$binname
     local _fullbinpath=$pkgdir/$_binrel
@@ -170,7 +171,6 @@ package() {
   done
   # prepare ld-library-path from rpath entries and delete rpath entries
   find $pkgdir/usr/lib/$_pkgwithver/ -name '*.so' | parallel --no-notice --no-run-if-empty --bar "chrpath --list {} 2>/dev/null && chrpath --delete {} >/dev/null 2>&1" | sed -n 's|.*RPATH=||g p' | tr ':' '\n' | sort | uniq | sed -r -e "s|^.*/([^/]*)/dist/build|/usr/lib/$_pkgwithver/lib/\1|" >$srcdir/ld.path
-  _createWrapperScript "$_wrapperScriptLocation" "$(cat $srcdir/ld.path | tr '\n' ':')"
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
