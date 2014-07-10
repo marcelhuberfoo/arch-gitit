@@ -72,10 +72,11 @@ _getcabaldepends() {
 }
 
 _installBuildHelpers() {
+  msg2 "Installing build helpers"
   local _sandboxbase=$(dirname $_cabalsandboxdir)
   pushd "$_sandboxbase" >/dev/null
-  cabal sandbox $_cabal_verbose --sandbox=$_cabalsandboxdir init
-  cabal update
+  cabal sandbox --sandbox=$_cabalsandboxdir init
+  cabal update >/dev/null
   cabal install \
     --flags="embed_data_files" \
     happy alex
@@ -98,31 +99,52 @@ prepare() {
   done
 }
 
+# arg1: configure options
+# arg2: package
+_buildPackageWithOpts() {
+  local _flags="$1"
+  local _hpkg=$2
+  if [ ! -d "$_builddir/$_hpkg" ]; then echo "Package $_hpkg not found, skipping"; return; fi
+  pushd $_builddir/$_hpkg >/dev/null
+  cabal configure \
+    --flags="$_flags" \
+    --prefix=/usr/lib/$_pkgwithver \
+    --datadir=/usr/share/$_pkgwithver \
+    --docdir=\$datadir/doc/\$pkgid \
+    --datasubdir=data/\$pkgid \
+    --libsubdir=\$pkgid
+  cabal build >/dev/null 2>&1;
+  cabal register --gen-pkg-config >/dev/null
+  if [ -f "$_hpkg.conf" ]; then
+    cp -fp $_hpkg.conf $_confdir
+  fi
+  cabal register --inplace >/dev/null
+  cabal copy --destdir=$_tmppackages
+  popd >/dev/null
+}
+
 build() {
   for _hspackages in "${_depends[@]}"; do
     local _flags="${_hspackages##*:}"
     local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
     for _hpkg in $_packages; do
-        if [ ! -d "$_builddir/$_hpkg" ]; then echo "Package $_hpkg not found, skipping"; continue; fi
-        pushd $_builddir/$_hpkg >/dev/null
-        msg2 "Building $_hpkg"
-        cabal configure \
-          --flags="$_flags" \
-          --prefix=/usr/lib/$_pkgwithver \
-          --datadir=/usr/share/$_pkgwithver \
-          --docdir=\$datadir/doc/\$pkgid \
-          --datasubdir=data/\$pkgid \
-          --libsubdir=\$pkgid
-        cabal build >/dev/null;
-        cabal register --gen-pkg-config >/dev/null
-        if [ -f "$_hpkg.conf" ]; then
-          cp -fp $_hpkg.conf $_confdir
-        fi
-        cabal register --inplace >/dev/null
-        cabal copy --destdir=$_tmppackages
-        popd >/dev/null
+      msg2 "Building $_hpkg"
+      _buildPackageWithOpts "$_flags" $_hpkg
     done
   done
+}
+
+# arg1: path and name of script
+_createWrapperScript() {
+  cat <<EOF >$1
+#!/bin/sh
+
+GHC_PACKAGE_PATH=\$(/usr/bin/ghc --print-global-package-db):$(echo $_packageconfdir | sed "s|$pkgdir||g" )
+export GHC_PACKAGE_PATH
+exec /usr/lib/$_pkgwithver/bin/\$(basename \$0) "\$@"
+
+EOF
+  chmod 0755 $1
 }
 
 package() {
@@ -132,12 +154,20 @@ package() {
   mkdir -p $_licensedstdir $_packageconfdir
   msg2 "Moving licenses..."
   ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
-  for d in usr/share/$_pkgwithver/doc usr/lib/$_pkgwithver/lib usr/lib/$_pkgwithver/bin; do
+  for d in usr/share/$_pkgwithver/{doc,data,man} usr/lib/$_pkgwithver/lib usr/lib/$_pkgwithver/bin; do
     msg2 "Copying $(basename $d)..."
     ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' $d ) | ( cd $pkgdir && tar xf - )
   done
   msg2 "Registering packages in package.conf.d..."
   find $_confdir -name '*.conf' -exec ghc-pkg update --force --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
+  msg2 "Creating scripts in /usr/bin..."
+  local _wrapperScriptLocation=$pkgdir/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
+  mkdir -p $pkgdir/usr/bin
+  for binname in gitit expireGititCache; do
+    local _fullbinpath=$pkgdir/usr/lib/$_pkgwithver/bin/$binname
+    [ -f "$_fullbinpath" ] && ln -s $_wrapperScriptLocation $pkgdir/usr/bin/$binname
+  done
+  _createWrapperScript $_wrapperScriptLocation
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
