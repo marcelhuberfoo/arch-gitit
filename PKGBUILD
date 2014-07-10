@@ -97,7 +97,7 @@ prepare() {
   fi
   msg2 "Downloading/Extracting packages"
   sed -n '2,$ p' $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && cabal fetch {}>/dev/null; find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
-  [ "$_firstpackage" = "$pkgname" ] && echo "$pkgname" >>$_dependantpackagesfile
+  [ "$_firstpackage" = "$pkgname" -a "$(sed -n '$ p' $_dependantpackagesfile | tr -d '\n')" != "$pkgname" ] && echo "$pkgname" >>$_dependantpackagesfile
 }
 
 # arg1: configure options
@@ -160,7 +160,7 @@ package() {
   msg2 "Registering packages in package.conf.d..."
   find $_confdir -name '*.conf' -exec ghc-pkg update --force --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
   msg2 "Creating scripts in /usr/bin..."
-  local _wrapperScriptLocation=$pkgdir/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
+  local _wrapperScriptLocation=/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
   mkdir -p $pkgdir/usr/bin
   for binname in gitit expireGititCache; do
     local _binrel=usr/lib/$_pkgwithver/bin/$binname
