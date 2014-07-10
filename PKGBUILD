@@ -34,38 +34,60 @@ _confdir=
 _tmpdir=
 _pkgwithver=
 _tmppackages=
-_tmpbindir=
+_cabalsandboxdir=
+_cabalsandboxbindir=
 _cabaldir=
+_packageconfdir=
 _depends=()
 
-_setupDirs() {
-  _builddir=$srcdir/build
-  _confdir=$_builddir/conf
+_setupLocalEnvVars() {
+  _builddir=$startdir/build
+  _confdir=$_builddir/package.conf
   _tmpdir=$_builddir/tmp
   _pkgwithver=$pkgname-$pkgver
   _tmppackages=$_builddir/pkg
-  _tmpbindir=$_tmppackages/usr/lib/$_pkgwithver/bin
+  # use another subdir for sandbox to not disturb regular build
+  _cabalsandboxdir=$_builddir/sandbox/.cabal-sandbox-$pkgname
+  _cabalsandboxbindir=$_cabalsandboxdir/bin
   _cabaldir=$_builddir/.cabal
-  mkdir -p $_confdir $_tmpdir $_tmppackages
+  _packageconfdir=$pkgdir/usr/lib/$_pkgwithver/package.conf.d
+  mkdir -p $_confdir $_tmpdir $_tmppackages $_cabalsandboxdir
 }
 
-_setupEnv() {
-  HOME=$_builddir; TMPDIR=$_tmpdir; PATH=$_tmpbindir:$PATH
+_setupEnvForCabalBuilding() {
+  # use our own local file storage for cabal instead of real $HOME/.cabal
+  HOME=$_builddir;
+  # in case your /tmp directory has no execute perms (needed for package installs)
+  TMPDIR=$_tmpdir;
+  [ -n "$TMPDIR" -a ! -d "$TMPDIR" ] && mkdir -p "$TMPDIR"
+  # prepend our cabal sandbox bindir to the path, for alex and happy
+  PATH=$_cabalsandboxbindir:$PATH
 }
 
 # $@ contains list of packages to get dependencies for
-getdepends() {
+_getcabaldepends() {
   pushd "$srcdir/$pkgname" >/dev/null
   cabal install --dry-run $@ 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1 | tr '\n' ':'
   popd >/dev/null
 }
 
+_installBuildHelpers() {
+  local _sandboxbase=$(dirname $_cabalsandboxdir)
+  pushd "$_sandboxbase" >/dev/null
+  cabal sandbox $_cabal_verbose --sandbox=$_cabalsandboxdir init
+  cabal update
+  cabal install \
+    --flags="embed_data_files" \
+    happy alex
+  popd >/dev/null
+}
+
 prepare() {
-  _setupDirs
-  _setupEnv
+  _setupLocalEnvVars
+  _installBuildHelpers
+  _setupEnvForCabalBuilding
   cabal update $_cabal_verbose
-  _depends[0]=$(getdepends alex happy):"embed_data_files"
-  _depends[1]=$(getdepends .):"embed_data_files plugins"
+  _depends[0]=$(_getcabaldepends .):"embed_data_files plugins"
   for _hspackages in "${_depends[@]}"; do
     local _flags="${_hspackages##*:}"
     local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
@@ -83,7 +105,7 @@ build() {
     for _hpkg in $_packages; do
         if [ ! -d "$_builddir/$_hpkg" ]; then echo "Package $_hpkg not found, skipping"; continue; fi
         pushd $_builddir/$_hpkg >/dev/null
-        msg2 "Building $_hpkg $_nameonly"
+        msg2 "Building $_hpkg"
         cabal configure \
           --flags="$_flags" \
           --prefix=/usr/lib/$_pkgwithver \
@@ -93,7 +115,9 @@ build() {
           --libsubdir=\$pkgid
         cabal build >/dev/null;
         cabal register --gen-pkg-config >/dev/null
-        [ -r "$_hpkg.conf" ] && cp $_hpkg.conf $_confdir;
+        if [ -f "$_hpkg.conf" ]; then
+          cp -fp $_hpkg.conf $_confdir
+        fi
         cabal register --inplace >/dev/null
         cabal copy --destdir=$_tmppackages
         popd >/dev/null
@@ -102,20 +126,18 @@ build() {
 }
 
 package() {
-  _setupDirs
+  _setupLocalEnvVars
   local _licensedstdir=$pkgdir/usr/share/licenses/$_pkgwithver
   local _licensesrcdir=$_tmppackages/usr/share/$_pkgwithver/doc
-  mkdir -p $_licensedstdir
-  msg2 "Copying licenses..."
+  mkdir -p $_licensedstdir $_packageconfdir
+  msg2 "Moving licenses..."
   ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
-  msg2 "Copying register configs..."
-  ( cd $_confdir && find . -name '*.conf' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_confdir/{} $pkgdir/usr/lib/$_pkgwithver/conf/{}" )
-  msg2 "Copying docs..."
-  ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' usr/share/$_pkgwithver/doc ) | ( cd $pkgdir && tar xf - )
-  msg2 "Copying libs..."
-  ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' usr/lib/$_pkgwithver/lib ) | ( cd $pkgdir && tar xf - )
-  msg2 "Copying bins..."
-  ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' usr/lib/$_pkgwithver/bin ) | ( cd $pkgdir && tar xf - )
+  for d in usr/share/$_pkgwithver/doc usr/lib/$_pkgwithver/lib usr/lib/$_pkgwithver/bin; do
+    msg2 "Copying $(basename $d)..."
+    ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' $d ) | ( cd $pkgdir && tar xf - )
+  done
+  msg2 "Registering packages in package.conf.d..."
+  find $_confdir -name '*.conf' -exec ghc-pkg update --force --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
