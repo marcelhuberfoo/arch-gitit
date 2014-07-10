@@ -37,36 +37,38 @@ _cabalsandboxdir=
 _cabalsandboxbindir=
 _cabaldir=
 _packageconfdir=
-_depends=()
+_dependantpackagesfile=
+_packagestobuild=("$pkgname" "embed_data_files plugins")
 
 _setupLocalEnvVars() {
-  _builddir=$srcdir/build
+  _builddir=$srcdir
   _confdir=$_builddir/package.conf
   _tmpdir=$_builddir/tmp
   _pkgwithver=$pkgname-$pkgver
   _tmppackages=$_builddir/pkg
+  _dependantpackagesfile=$_builddir/${_packagestobuild[0]}.depends
   # use another subdir for sandbox to not disturb regular build
   _cabalsandboxdir=$_builddir/sandbox/.cabal-sandbox-$pkgname
   _cabalsandboxbindir=$_cabalsandboxdir/bin
   _cabaldir=$_builddir/.cabal
   _packageconfdir=$pkgdir/usr/lib/$_pkgwithver/package.conf.d
   mkdir -p $_confdir $_tmpdir $_tmppackages $_cabalsandboxdir
-}
-
-_setupEnvForCabalBuilding() {
-  # use our own local file storage for cabal instead of real $HOME/.cabal
-  HOME=$_builddir;
   # in case your /tmp directory has no execute perms (needed for package installs)
-  TMPDIR=$_tmpdir;
+  export TMPDIR=$_tmpdir;
   [ -n "$TMPDIR" -a ! -d "$TMPDIR" ] && mkdir -p "$TMPDIR"
-  # prepend our cabal sandbox bindir to the path, for alex and happy
-  PATH=$_cabalsandboxbindir:$PATH
+  # use our own local file storage for cabal instead of real $HOME/.cabal
+  export HOME=$_builddir;
+  export PATH=$_cabalsandboxbindir:$PATH
 }
 
 # $@ contains list of packages to get dependencies for
 _getcabaldepends() {
   pushd "$srcdir/$pkgname" >/dev/null
-  cabal install --dry-run $@ 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1 | tr '\n' ':'
+  local _installoptions="$1"
+  shift
+  local _packiges=$@
+  [ "$1" = "$pkgname" ] &&  _packiges=.
+  cabal install --dry-run $_installoptions $_packiges 2>/dev/null | grep "\-[0-9]\+" | cut -d' ' -f1
   popd >/dev/null
 }
 
@@ -85,17 +87,17 @@ _installBuildHelpers() {
 prepare() {
   _setupLocalEnvVars
   _installBuildHelpers
-  _setupEnvForCabalBuilding
   cabal update $_cabal_verbose
-  _depends[0]=$(_getcabaldepends .):"embed_data_files plugins"
-  for _hspackages in "${_depends[@]}"; do
-    local _flags="${_hspackages##*:}"
-    local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
-    msg2 "Downloading packages"
-    cabal fetch $_packages
-    msg2 "Extracting packages"
-    echo $_packages | tr ' ' '\n' | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
-  done
+  local _firstpackage=$(echo ${_packagestobuild[0]} | cut -d' ' -f1)
+  local _installopts=""
+  [ "$_firstpackage" = "$pkgname" ] && _installopts="--dependencies-only"
+  if [ ! -f "$_dependantpackagesfile" ]; then
+    echo ${_packagestobuild[1]} >$_dependantpackagesfile
+    _getcabaldepends "$_installopts" ${_packagestobuild[0]} >>$_dependantpackagesfile
+  fi
+  msg2 "Downloading/Extracting packages"
+  sed -n '2,$ p' $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && cabal fetch {}>/dev/null; find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
+  [ "$_firstpackage" = "$pkgname" ] && echo "$pkgname" >>$_dependantpackagesfile
 }
 
 # arg1: configure options
@@ -112,7 +114,7 @@ _buildPackageWithOpts() {
     --docdir=\$datadir/doc/\$pkgid \
     --datasubdir=data/\$pkgid \
     --libsubdir=\$pkgid
-  cabal build >/dev/null 2>&1;
+  cabal build; #>/dev/null 2>&1;
   cabal register --gen-pkg-config >/dev/null
   if [ -f "$_hpkg.conf" ]; then
     cp -fp $_hpkg.conf $_confdir
@@ -123,14 +125,11 @@ _buildPackageWithOpts() {
 }
 
 build() {
-  for _hspackages in "${_depends[@]}"; do
-    local _flags="${_hspackages##*:}"
-    local _packages=$(echo ${_hspackages%:*} | tr ':' ' ')
-    for _hpkg in $_packages; do
-      msg2 "Building $_hpkg"
-      _buildPackageWithOpts "$_flags" $_hpkg
-    done
-  done
+  local _flags="$(sed -n '1 p' $_dependantpackagesfile | tr -d '\n')"
+  export -f _buildPackageWithOpts
+  export _builddir _pkgwithver _tmppackages _confdir
+  sed -n '2,$ p' $_dependantpackagesfile | parallel --jobs 1 --no-notice --no-run-if-empty --bar "_buildPackageWithOpts \"$(sed -n '1 p' $_dependantpackagesfile)\" {}"
+#  sed -n '2,$ p' $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "pushd $_builddir/{} >/dev/null; cabal clean; popd >/dev/null"
 }
 
 # arg1: path and name of script
