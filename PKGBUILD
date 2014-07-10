@@ -8,9 +8,8 @@ pkgdesc="Wiki using happstack, git or darcs, and pandoc."
 url="https://github.com/jgm/gitit"
 license=('GPL')
 arch=('i686' 'x86_64')
-# Needed for pandoc-citeproc
-depends=('sh' 'icu>=52' 'icu<=54' 'ghc' 'cabal-install>=1.20')
-makedepends=('parallel')
+depends=('sh' 'ghc' 'cabal-install>=1.20')
+makedepends=('parallel' 'chrpath')
 optdepends=('texlive-most: for pdf creation')
 options=(strip staticlibs !makeflags !distcc !emptydirs)
 source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
@@ -41,7 +40,7 @@ _packageconfdir=
 _depends=()
 
 _setupLocalEnvVars() {
-  _builddir=$startdir/build
+  _builddir=$srcdir/build
   _confdir=$_builddir/package.conf
   _tmpdir=$_builddir/tmp
   _pkgwithver=$pkgname-$pkgver
@@ -140,7 +139,8 @@ _createWrapperScript() {
 #!/bin/sh
 
 GHC_PACKAGE_PATH=\$(/usr/bin/ghc --print-global-package-db):$(echo $_packageconfdir | sed "s|$pkgdir||g" )
-export GHC_PACKAGE_PATH
+LD_LIBRARY_PATH=$2:\$LD_LIBRARY_PATH
+export GHC_PACKAGE_PATH LD_LIBRARY_PATH
 exec /usr/lib/$_pkgwithver/bin/\$(basename \$0) "\$@"
 
 EOF
@@ -154,7 +154,7 @@ package() {
   mkdir -p $_licensedstdir $_packageconfdir
   msg2 "Moving licenses..."
   ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
-  for d in usr/share/$_pkgwithver/{doc,data,man} usr/lib/$_pkgwithver/lib usr/lib/$_pkgwithver/bin; do
+  for d in usr/share/$_pkgwithver/{doc,data,man} usr/lib/$_pkgwithver/lib; do
     msg2 "Copying $(basename $d)..."
     ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' $d ) | ( cd $pkgdir && tar xf - )
   done
@@ -164,10 +164,14 @@ package() {
   local _wrapperScriptLocation=$pkgdir/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
   mkdir -p $pkgdir/usr/bin
   for binname in gitit expireGititCache; do
-    local _fullbinpath=$pkgdir/usr/lib/$_pkgwithver/bin/$binname
+    local _binrel=usr/lib/$_pkgwithver/bin/$binname
+    local _fullbinpath=$pkgdir/$_binrel
+    install -Dm555 $_tmppackages/$_binrel $_fullbinpath
     [ -f "$_fullbinpath" ] && ln -s $_wrapperScriptLocation $pkgdir/usr/bin/$binname
   done
-  _createWrapperScript $_wrapperScriptLocation
+  # prepare ld-library-path from rpath entries and delete rpath entries
+  find $pkgdir/usr/lib/$_pkgwithver/ -name '*.so' | parallel --no-notice --no-run-if-empty --bar "chrpath --list {} 2>/dev/null && chrpath --delete {} >/dev/null 2>&1" | sed -n 's|.*RPATH=||g p' | tr ':' '\n' | sort | uniq | sed -r -e "s|^.*/([^/]*)/dist/build|/usr/lib/$_pkgwithver/lib/\1|" >$srcdir/ld.path
+  _createWrapperScript "$_wrapperScriptLocation" "$(cat $srcdir/ld.path | tr '\n' ':')"
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
