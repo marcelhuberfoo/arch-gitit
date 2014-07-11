@@ -84,20 +84,39 @@ _installBuildHelpers() {
   popd >/dev/null
 }
 
+_extractFlags() {
+  local _filename=$1
+  sed -n '1 p' $_filename | tr -d '\n'
+}
+
+_extractPackages() {
+  local _filename=$1
+  sed -n '2,$ p' $_filename
+}
+
+_extractLastPackage() {
+  local _filename=$1
+  sed -n '$ p' $_filename
+}
+
 prepare() {
   _setupLocalEnvVars
   _installBuildHelpers
   cabal update $_cabal_verbose
   local _firstpackage=$(echo ${_packagestobuild[0]} | cut -d' ' -f1)
   local _installopts=""
-  [ "$_firstpackage" = "$pkgname" ] && _installopts="--dependencies-only"
+  if [ "$_firstpackage" = "$pkgname" ]; then
+    _installopts="--dependencies-only";
+  fi
   if [ ! -f "$_dependantpackagesfile" ]; then
     echo ${_packagestobuild[1]} >$_dependantpackagesfile
     _getcabaldepends "$_installopts" ${_packagestobuild[0]} >>$_dependantpackagesfile
   fi
   msg2 "Downloading/Extracting packages"
-  sed -n '2,$ p' $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && cabal fetch {}>/dev/null; find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
-  [ "$_firstpackage" = "$pkgname" -a "$(sed -n '$ p' $_dependantpackagesfile | tr -d '\n')" != "$pkgname" ] && echo "$pkgname" >>$_dependantpackagesfile
+  _extractPackages $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && cabal fetch {}>/dev/null; find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
+  if [ "$_firstpackage" = "$pkgname" -a ! "$(_extractLastPackage $_dependantpackagesfile | tr -d '\n')" = "$pkgname" ]; then
+    echo "$pkgname" >>$_dependantpackagesfile;
+  fi
 }
 
 # arg1: configure options
@@ -125,15 +144,15 @@ _buildPackageWithOpts() {
 }
 
 build() {
-  local _flags="$(sed -n '1 p' $_dependantpackagesfile | tr -d '\n')"
+  local _flags="$(_extractFlags $_dependantpackagesfile)"
   export -f _buildPackageWithOpts
   export _builddir _pkgwithver _tmppackages _confdir
-  sed -n '2,$ p' $_dependantpackagesfile | parallel --jobs 1 --no-notice --no-run-if-empty --bar "_buildPackageWithOpts \"$(sed -n '1 p' $_dependantpackagesfile)\" {}"
-#  sed -n '2,$ p' $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "pushd $_builddir/{} >/dev/null; cabal clean; popd >/dev/null"
+  _extractPackages $_dependantpackagesfile | parallel --jobs 1 --no-notice --no-run-if-empty --bar "_buildPackageWithOpts \"$_flags\" {}"
 }
 
 # arg1: path and name of script
 _createWrapperScript() {
+  mkdir -p "$(dirname $1)"
   cat <<EOF >$1
 #!/bin/sh
 
@@ -146,10 +165,20 @@ EOF
   chmod 0755 $1
 }
 
+_adjustRPATH() {
+  local _libbasedir=$1
+  local _outputfile=$2
+  local _cmd="chrpath --replace \"\$(chrpath {} | sed -n -e 's|.*RPATH=|| p' | tr ':' '\n' | sed -r -e 's|^.*/([^/]*)/dist/build|/usr/lib/"$_pkgwithver"/lib/\1|g' | tr '\n' ':')\" {} >/dev/null 2>&1"
+  find $_libbasedir -name '*.so' | parallel --jobs 1 --no-notice --no-run-if-empty --bar "$_cmd" || true
+  touch $_outputfile
+#  find $_libbasedir -name '*.so' | parallel --no-notice --no-run-if-empty --bar "chrpath --list {} 2>/dev/null && chrpath --delete {} >/dev/null 2>&1" | sed -n 's|.*RPATH=||g p' | tr ':' '\n' | sort | uniq | sed -r -e "s|^.*/([^/]*)/dist/build|/usr/lib/$_pkgwithver/lib/\1|" >$_outputfile
+}
+
 package() {
   _setupLocalEnvVars
   local _licensedstdir=$pkgdir/usr/share/licenses/$_pkgwithver
   local _licensesrcdir=$_tmppackages/usr/share/$_pkgwithver/doc
+  local _pkglibbasedir=$pkgdir/usr/lib/$_pkgwithver
   mkdir -p $_licensedstdir $_packageconfdir
   msg2 "Moving licenses..."
   ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
@@ -160,17 +189,19 @@ package() {
   msg2 "Registering packages in package.conf.d..."
   find $_confdir -name '*.conf' -exec ghc-pkg update --force --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
   msg2 "Creating scripts in /usr/bin..."
-  local _wrapperScriptLocation=$pkgdir/usr/lib/$_pkgwithver/bin/gitit_wrapper.sh
-  mkdir -p $pkgdir/usr/bin
+  local _wrapperScriptLocation=$_pkglibbasedir/bin/gitit_wrapper.sh
+  # prepare ld-library-path from rpath entries and delete rpath entries
+  _adjustRPATH "$_pkglibbasedir" "$srcdir/ld.path"
   _createWrapperScript "$_wrapperScriptLocation" "$(cat $srcdir/ld.path | tr '\n' ':')"
+  mkdir -p $pkgdir/usr/bin
   for binname in gitit expireGititCache; do
     local _binrel=usr/lib/$_pkgwithver/bin/$binname
     local _fullbinpath=$pkgdir/$_binrel
     install -Dm555 $_tmppackages/$_binrel $_fullbinpath
     [ -f "$_fullbinpath" ] && ( cd $pkgdir/usr/bin && ln -s ${_wrapperScriptLocation/$pkgdir/} $binname )
   done
-  # prepare ld-library-path from rpath entries and delete rpath entries
-  find $pkgdir/usr/lib/$_pkgwithver/ -name '*.so' | parallel --no-notice --no-run-if-empty --bar "chrpath --list {} 2>/dev/null && chrpath --delete {} >/dev/null 2>&1" | sed -n 's|.*RPATH=||g p' | tr ':' '\n' | sort | uniq | sed -r -e "s|^.*/([^/]*)/dist/build|/usr/lib/$_pkgwithver/lib/\1|" >$srcdir/ld.path
+# clean up explicitly if wanted
+#  _extractPackages $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "pushd $_builddir/{} >/dev/null; cabal clean; popd >/dev/null"
 }
 
 # vim: set ft=sh syn=sh ts=2 sw=2 et:
