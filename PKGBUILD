@@ -135,8 +135,8 @@ _buildPackageWithOpts() {
     --libsubdir=\$pkgid
   cabal build; #>/dev/null 2>&1;
   cabal register --gen-pkg-config >/dev/null
-  if [ -f "$_hpkg.conf" ]; then
-    cp -fp $_hpkg.conf $_confdir
+  if [ -f "$_hpkg*.conf" ]; then
+    cp -fp $_hpkg*.conf $_confdir
   fi
   cabal register --inplace >/dev/null
   cabal copy --destdir=$_tmppackages
@@ -179,7 +179,7 @@ package() {
   local _licensedstdir=$pkgdir/usr/share/licenses/$_pkgwithver
   local _licensesrcdir=$_tmppackages/usr/share/$_pkgwithver/doc
   local _pkglibbasedir=$pkgdir/usr/lib/$_pkgwithver
-  mkdir -p $_licensedstdir $_packageconfdir
+  mkdir -p $_licensedstdir
   msg2 "Moving licenses..."
   ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
   for d in usr/share/$_pkgwithver/{doc,data,man} usr/lib/$_pkgwithver/lib; do
@@ -187,7 +187,8 @@ package() {
     ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' $d ) | ( cd $pkgdir && tar xf - )
   done
   msg2 "Registering packages in package.conf.d..."
-  find $_confdir -name '*.conf' -exec ghc-pkg update --force --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
+  ghc-pkg init $_packageconfdir >/dev/null 2>&1;
+  find $_confdir -name '*.conf' -exec ghc-pkg update --force-files --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
   msg2 "Creating scripts in /usr/bin..."
   local _wrapperScriptLocation=$_pkglibbasedir/bin/gitit_wrapper.sh
   # prepare ld-library-path from rpath entries and delete rpath entries
