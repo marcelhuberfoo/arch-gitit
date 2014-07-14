@@ -12,9 +12,10 @@ depends=('sh' 'ghc' 'cabal-install>=1.20')
 makedepends=('parallel' 'chrpath')
 optdepends=('texlive-most: for pdf creation')
 options=(strip staticlibs !makeflags !distcc !emptydirs)
-source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver")
-#install=$pkgname.install
-sha256sums=('SKIP')
+source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver"
+        plugins.patch)
+sha256sums=('SKIP'
+            '3982ab0556c65a94fbe5b279a28928691e5e65747295b3e9bb20df66aa5339c6')
 
 #pkgver() {
 #  cd "$srcdir/$pkgname"
@@ -38,7 +39,11 @@ _cabalsandboxbindir=
 _cabaldir=
 _packageconfdir=
 _dependantpackagesfile=
-_packagestobuild=("$pkgname" "embed_data_files plugins")
+_packagestobuild=("$pkgname" ". datetime" "embed_data_files plugins")
+
+_firstPackageNameFromPackagesToBuildList() {
+  echo ${_packagestobuild[0]}
+}
 
 _setupLocalEnvVars() {
   _builddir=$srcdir
@@ -46,7 +51,7 @@ _setupLocalEnvVars() {
   _tmpdir=$_builddir/tmp
   _pkgwithver=$pkgname-$pkgver
   _tmppackages=$_builddir/pkg
-  _dependantpackagesfile=$_builddir/${_packagestobuild[0]}.depends
+  _dependantpackagesfile=$_builddir/$(_firstPackageNameFromPackagesToBuildList).depends
   # use another subdir for sandbox to not disturb regular build
   _cabalsandboxdir=$_builddir/sandbox/.cabal-sandbox-$pkgname
   _cabalsandboxbindir=$_cabalsandboxdir/bin
@@ -100,23 +105,22 @@ _extractLastPackage() {
 }
 
 prepare() {
+  cd "$srcdir/$pkgname"
+  patch -Np1 -i "$srcdir"/plugins.patch
   _setupLocalEnvVars
   _installBuildHelpers
   cabal update $_cabal_verbose
-  local _firstpackage=$(echo ${_packagestobuild[0]} | cut -d' ' -f1)
+  local _firstpackage=$(_firstPackageNameFromPackagesToBuildList)
   local _installopts=""
-  if [ "$_firstpackage" = "$pkgname" ]; then
-    _installopts="--dependencies-only";
-  fi
   if [ ! -f "$_dependantpackagesfile" ]; then
-    echo ${_packagestobuild[1]} >$_dependantpackagesfile
-    _getcabaldepends "$_installopts" ${_packagestobuild[0]} >>$_dependantpackagesfile
+    echo ${_packagestobuild[2]} >$_dependantpackagesfile
+    _getcabaldepends "$_installopts" ${_packagestobuild[1]} | grep -v "^$pkgname" >>$_dependantpackagesfile
+    if [ "$_firstpackage" = "$pkgname" ]; then
+      echo "$pkgname" >>$_dependantpackagesfile;
+    fi
   fi
   msg2 "Downloading/Extracting packages"
   _extractPackages $_dependantpackagesfile | parallel --no-notice --no-run-if-empty --bar "cd $_builddir && cabal fetch {}>/dev/null; find $_cabaldir -name {}.tar.gz -exec tar xzf \{\} \;"
-  if [ "$_firstpackage" = "$pkgname" -a ! "$(_extractLastPackage $_dependantpackagesfile | tr -d '\n')" = "$pkgname" ]; then
-    echo "$pkgname" >>$_dependantpackagesfile;
-  fi
 }
 
 # arg1: configure options
@@ -133,10 +137,11 @@ _buildPackageWithOpts() {
     --docdir=\$datadir/doc/\$pkgid \
     --datasubdir=data/\$pkgid \
     --libsubdir=\$pkgid
-  cabal build; #>/dev/null 2>&1;
+  cabal build >/dev/null 2>&1;
   cabal register --gen-pkg-config >/dev/null
-  if [ -f "$_hpkg*.conf" ]; then
-    cp -fp $_hpkg*.conf $_confdir
+  local _conffile="$(ls $_hpkg*.conf)"
+  if [ -f "$_conffile" ]; then
+    cp -fp $_conffile $_confdir
   fi
   cabal register --inplace >/dev/null
   cabal copy --destdir=$_tmppackages
@@ -156,7 +161,7 @@ _createWrapperScript() {
   cat <<EOF >$1
 #!/bin/sh
 
-GHC_PACKAGE_PATH=\$(/usr/bin/ghc --print-global-package-db):$(echo $_packageconfdir | sed "s|$pkgdir||g" )
+GHC_PACKAGE_PATH=\$(/usr/bin/ghc --print-global-package-db):$(echo $_packageconfdir | sed "s|$pkgdir||g" ):\$GHC_PACKAGE_PATH
 LD_LIBRARY_PATH=$2:\$LD_LIBRARY_PATH
 export GHC_PACKAGE_PATH LD_LIBRARY_PATH
 exec /usr/lib/$_pkgwithver/bin/\$(basename \$0) "\$@"
@@ -169,9 +174,8 @@ _adjustRPATH() {
   local _libbasedir=$1
   local _outputfile=$2
   local _cmd="chrpath --replace \"\$(chrpath {} | sed -n -e 's|.*RPATH=|| p' | tr ':' '\n' | sed -r -e 's|^.*/([^/]*)/dist/build|/usr/lib/"$_pkgwithver"/lib/\1|g' | tr '\n' ':')\" {} >/dev/null 2>&1"
-  find $_libbasedir -name '*.so' | parallel --jobs 1 --no-notice --no-run-if-empty --bar "$_cmd" || true
+  find $_libbasedir -name '*.so' | parallel --jobs 1 --no-notice --no-run-if-empty "$_cmd" || true
   touch $_outputfile
-#  find $_libbasedir -name '*.so' | parallel --no-notice --no-run-if-empty --bar "chrpath --list {} 2>/dev/null && chrpath --delete {} >/dev/null 2>&1" | sed -n 's|.*RPATH=||g p' | tr ':' '\n' | sort | uniq | sed -r -e "s|^.*/([^/]*)/dist/build|/usr/lib/$_pkgwithver/lib/\1|" >$_outputfile
 }
 
 package() {
@@ -181,7 +185,7 @@ package() {
   local _pkglibbasedir=$pkgdir/usr/lib/$_pkgwithver
   mkdir -p $_licensedstdir
   msg2 "Moving licenses..."
-  ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice --bar "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
+  ( cd $_licensesrcdir && find . -maxdepth 2 -name 'LICENSE' | parallel --no-run-if-empty --no-notice "install -Dm444 $_licensesrcdir/{} $_licensedstdir/{}" )
   for d in usr/share/$_pkgwithver/{doc,data,man} usr/lib/$_pkgwithver/lib; do
     msg2 "Copying $(basename $d)..."
     ( cd $_tmppackages && tar cf - --exclude='*/LICENSE' $d ) | ( cd $pkgdir && tar xf - )
