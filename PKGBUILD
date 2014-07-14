@@ -173,9 +173,15 @@ EOF
 _adjustRPATH() {
   local _libbasedir=$1
   local _outputfile=$2
-  local _cmd="chrpath --replace \"\$(chrpath {} | sed -n -e 's|.*RPATH=|| p' | tr ':' '\n' | sed -r -e 's|^.*/([^/]*)/dist/build|/usr/lib/"$_pkgwithver"/lib/\1|g' | tr '\n' ':')\" {} >/dev/null 2>&1"
+  local _cmd="chrpath --replace \"\$(chrpath --list {} | sed -n -e 's|.*RPATH=|| p' | tr ':' '\n' | sed -r -e 's|^.*/([^/]*)/dist/build|/usr/lib/"$_pkgwithver"/lib/\1|g' | tr '\n' ':')\" {} >/dev/null 2>&1"
   find $_libbasedir -name '*.so' | parallel --jobs 1 --no-notice --no-run-if-empty "$_cmd" || true
   touch $_outputfile
+}
+
+_stripRPATH() {
+  local _libbasedir=$1
+  local _outputfile=$2
+  find $_libbasedir -name '*.so' | parallel --jobs 1 --no-notice --no-run-if-empty "chrpath --list {} 2>/dev/null && chrpath --delete {} >/dev/null 2>&1" | sed -n 's|.*RPATH=||g p' | tr ':' '\n' | sort | uniq | sed -r -e "s|^.*/([^/]*)/dist/build|/usr/lib/$_pkgwithver/lib/\1|g" | sed -r '/^$/ d' >$_outputfile || true
 }
 
 package() {
@@ -195,8 +201,10 @@ package() {
   find $_confdir -name '*.conf' -exec ghc-pkg update --force-files --package-db=$_packageconfdir {} >/dev/null 2>&1 \;
   msg2 "Creating scripts in /usr/bin..."
   local _wrapperScriptLocation=$_pkglibbasedir/bin/gitit_wrapper.sh
-  # prepare ld-library-path from rpath entries and delete rpath entries
-  _adjustRPATH "$_pkglibbasedir" "$srcdir/ld.path"
+#  # adjust rpath entries pointing to build location
+#  _adjustRPATH "$_pkglibbasedir" "$srcdir/ld.path"
+  # delete rpath entries pointing to build location
+  _stripRPATH "$_pkglibbasedir" "$srcdir/ld.path"
   _createWrapperScript "$_wrapperScriptLocation" "$(cat $srcdir/ld.path | tr '\n' ':')"
   mkdir -p $pkgdir/usr/bin
   for binname in gitit expireGititCache; do
