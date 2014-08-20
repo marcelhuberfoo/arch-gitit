@@ -3,12 +3,12 @@
 
 pkgname=gitit
 pkgver=0.10.4
-pkgrel=1
+pkgrel=2
 pkgdesc="Wiki using happstack, git or darcs, and pandoc."
 url="https://github.com/jgm/gitit"
 license=('GPL')
 arch=('i686' 'x86_64')
-depends=('sh' 'ghc' 'cabal-install>=1.20')
+depends=('sh' 'ghc==7.8.3' 'cabal-install>=1.20')
 makedepends=('parallel' 'chrpath')
 optdepends=('texlive-most: for pdf creation')
 options=(strip staticlibs !makeflags !distcc !emptydirs)
