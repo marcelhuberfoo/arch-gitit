@@ -6,8 +6,6 @@ Subject: (naively) corrected plugin code to run with current set of libs
 ---
  plugins/CapitalizeEmphasis.hs | 2 +-
  plugins/PigLatin.hs           | 2 +-
- plugins/Subst.hs              | 2 +-
- 3 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/plugins/CapitalizeEmphasis.hs b/plugins/CapitalizeEmphasis.hs
 index 59055aa..da2b960 100644
@@ -35,19 +33,6 @@ index a306462..f60c636 100644
         _ -> return doc
  
  pigLatinStr :: Inline -> Inline
-diff --git a/plugins/Subst.hs b/plugins/Subst.hs
-index 5425eec..3527834 100644
---- a/plugins/Subst.hs
-+++ b/plugins/Subst.hs
-@@ -6,7 +6,7 @@
- 
- module Subst (plugin) where
- 
--import Control.Monad.CatchIO (try)
-+import Control.Monad.Catch (try)
- import Data.FileStore (FileStoreError, retrieve)
- import Text.Pandoc (def, readMarkdown)
- import Network.Gitit.ContentTransformer (inlinesToString)
 -- 
 2.0.1
 

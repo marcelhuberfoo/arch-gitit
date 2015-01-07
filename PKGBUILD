@@ -2,8 +2,8 @@
 # Maintainer: Marcel Huber <`echo "moc tknup liamg tä oofrebuhlecram" | rev`>
 
 pkgname=gitit
-pkgver=0.10.4
-pkgrel=2
+pkgver=0.10.6.1
+pkgrel=1
 pkgdesc="Wiki using happstack, git or darcs, and pandoc."
 url="https://github.com/jgm/gitit"
 license=('GPL')
@@ -15,7 +15,7 @@ options=(strip staticlibs !makeflags !distcc !emptydirs)
 source=("$pkgname"::"git+https://github.com/jgm/gitit.git#tag=$pkgver"
         plugins.patch)
 sha256sums=('SKIP'
-            '3982ab0556c65a94fbe5b279a28928691e5e65747295b3e9bb20df66aa5339c6')
+            '142646d8d5ea06dd799f68746672dbbd25453e627e6cd55afa7e168a4aaeef68')
 
 #pkgver() {
 #  cd "$srcdir/$pkgname"
